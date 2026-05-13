@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ASL Translator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- these blobs are just here to make the page feel less empty -->
+<div class="blobs" aria-hidden="true">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="blob b4"></div>
+</div>
+
+<!-- top bar thing -->
+<header class="topbar">
+  <a class="brand" href="#">
+    <span class="brand-mark" aria-hidden="true">
+      <span class="bd bd1"></span><span class="bd bd2"></span><span class="bd bd3"></span>
+    </span>
+    <span class="brand-word">asl translator</span>
+  </a>
+  <span class="topbar-tag">voice-ready frontend</span>
+</header>
+
+<!-- main page wrapper -->
+<main class="page">
+  <!-- intro section because first impressions matter -->
+  <section class="intro">
+    <span class="eyebrow">
+      <span class="eyebrow-dot"></span>
+      live ASL translator
+    </span>
+    <h1 class="display">
+      Turn ASL into <span class="ink-grad">voice,</span> instantly.
+    </h1>
+    <p class="lede">Record yourself signing, let the backend translate, and hear it spoken out loud.</p>
+  </section>
+
+  <!-- the main app card -->
+  <section class="studio" data-screen-label="Studio">
+    <!-- step rail that shows the fake progress -->
+    <ol class="steprail" aria-label="Pipeline status">
+      <li class="step" data-step="record" data-state="idle">
+        <span class="step-num">1</span>
+        <span class="step-name">Record</span>
+      </li>
+      <li class="step-dash"></li>
+      <li class="step" data-step="detect" data-state="idle">
+        <span class="step-num">2</span>
+        <span class="step-name">Detect</span>
+      </li>
+      <li class="step-dash"></li>
+      <li class="step" data-step="translate" data-state="idle">
+        <span class="step-num">3</span>
+        <span class="step-name">Translate</span>
+      </li>
+      <li class="step-dash"></li>
+      <li class="step" data-step="speak" data-state="idle">
+        <span class="step-num">4</span>
+        <span class="step-name">Speak</span>
+      </li>
+    </ol>
+
+    <!-- camera / preview stage -->
+    <div class="stage">
+      <video id="camera" playsinline muted autoplay></video>
+
+      <!-- placeholder when camera is not ready -->
+      <div class="placeholder" id="placeholder">
+        <div class="ph-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="56" height="56">
+            <rect x="8" y="18" width="36" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="3"/>
+            <path d="M44 26 L56 20 V44 L44 38 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="ph-title">Your webcam will appear here</p>
+        <p class="ph-sub">Press <em>Start recording</em> or upload a video below.</p>
+      </div>
+
+      <!-- corner marks because that looks fancy -->
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+
+      <!-- recording pill -->
+      <div class="recpill" id="recPill" hidden>
+        <span class="rdot"></span><span id="recTime">0:00</span>
+      </div>
+
+      <!-- scan overlay for the backend wait moment -->
+      <div class="scanning" id="scanning" hidden>
+        <div class="scan-line"></div>
+        <div class="scan-label">waiting for backend analysis…</div>
+        <div class="floating-hands">
+          <span>✋</span><span>🤚</span><span>👋</span><span>🤟</span><span>👌</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- buttons area -->
+    <div class="controls">
+      <button class="btn-primary" id="recordBtn">
+        <span class="btn-dot"></span>
+        <span id="recordLabel">Start recording</span>
+      </button>
+      <label class="btn-ghost upload-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 4 V16 M6 10 L12 4 L18 10 M5 20 H19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Upload video
+        <input type="file" accept="video/*" id="uploadInput" hidden/>
+      </label>
+      <button class="btn-ghost btn-icon" id="resetBtn" aria-label="Reset">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 12 a8 8 0 1 0 3-6.2 M4 4 V10 H10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <!-- output panels -->
+    <div class="result" id="result">
+      <!-- detected signs panel -->
+      <div class="result-card gestures-card">
+        <header>
+          <span class="card-kicker">detected signs</span>
+          <span class="conf" id="confLabel">—</span>
+        </header>
+        <div class="gestures" id="gestures">
+          <span class="empty">No signs yet — record something to begin.</span>
+        </div>
+      </div>
+
+      <!-- translated sentence panel -->
+      <div class="result-card sentence-card">
+        <header>
+          <span class="card-kicker">translation</span>
+          <div class="tones">
+            <button class="tone is-active" data-tone="warm">warm</button>
+            <button class="tone" data-tone="neutral">neutral</button>
+            <button class="tone" data-tone="formal">formal</button>
+          </div>
+        </header>
+        <div class="bubble" id="bubble">
+          <p id="sentenceText" class="bubble-text bubble-placeholder">Your translated sentence will appear here.</p>
+        </div>
+      </div>
+
+      <!-- voice panel -->
+      <div class="result-card voice-card" id="voiceCard">
+        <header>
+          <span class="card-kicker">voice</span>
+          <select id="voiceSel" aria-label="Voice">
+            <option value="nova">Nova · clear &amp; friendly</option>
+            <option value="rio">Rio · warm tenor</option>
+            <option value="ash">Ash · calm narrator</option>
+            <option value="june">June · bright soprano</option>
+          </select>
+        </header>
+        <div class="player">
+          <button class="playbtn" id="playBtn" aria-label="Play voice" disabled>
+            <svg class="ico-play" viewBox="0 0 24 24" width="20" height="20"><path d="M7 5 L19 12 L7 19 Z" fill="currentColor"/></svg>
+            <svg class="ico-pause" viewBox="0 0 24 24" width="20" height="20"><rect x="7" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="13" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>
+          </button>
+          <div class="player-mid">
+            <div class="waveform" id="waveform" aria-hidden="true"></div>
+            <div class="time"><span id="voiceCur">0:00</span><span class="time-sep">·</span><span id="voiceDur">0:00</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- tiny footer -->
+<footer class="foot">
+  <p>Made with love &hearts;</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
