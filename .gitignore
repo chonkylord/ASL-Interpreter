@@ -1,0 +1,14 @@
+# JetBrains IDE
+.idea/
+
+# VS Code
+.vscode/
+
+# env / secrets
+.env
+*.env
+
+# node
+node_modules/
+
+config.js
