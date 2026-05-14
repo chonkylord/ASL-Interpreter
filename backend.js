@@ -23,13 +23,10 @@ window.aslBackend = {
     }
 
     const signsList = symbols.map(s => s.label).join(", ");
-    const prompt = `You are a casual translation assistant. 
-Convert the following sequence of ASL glosses/signs into quick, casual conversational slang. 
-Do not use stiff, overly formal grammar, and avoid long drawn-out sentences. 
-Keep it extremely brief, clear cut, and make it sound like a real person casually texting or talking.
-Example tone: ${options.tone || 'neutral'}.
-
-Only reply with the translated phrase. No quotes, no explanations, no AI-speak. Just the words.
+    const prompt = `You are an expert ASL to English translator. 
+Convert the following sequence of ASL glosses/signs into a natural, grammatically correct English sentence.
+Required tone of the sentence: ${options.tone || 'neutral'}.
+Only reply with the final translated sentence. Do not include quotes, explanations, or any other wrapper text.
 
 Signs: ${signsList}`;
 
