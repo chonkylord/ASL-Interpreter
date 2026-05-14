@@ -17,42 +17,61 @@ window.aslBackend = {
     });
   },
 
-  // send signs to openrouter to get a real sentence back
   interpret: async function (symbols, options) {
+    if (!CONFIG?.OPENROUTER_API_KEY || CONFIG.OPENROUTER_API_KEY === "YOUR_API_KEY_HERE") {
+      return { text: "err: missing api key in config.js" };
+    }
 
     const signsList = symbols.map(s => s.label).join(", ");
+    const prompt = `You are a casual translation assistant. 
+Convert the following sequence of ASL glosses/signs into quick, casual conversational slang. 
+Do not use stiff, overly formal grammar, and avoid long drawn-out sentences. 
+Keep it extremely brief, clear cut, and make it sound like a real person casually texting or talking.
+Example tone: ${options.tone || 'neutral'}.
 
-    const prompt = `You are an expert ASL to English translator. 
-Convert the following sequence of ASL glosses/signs into a natural, grammatically correct English sentence.
-Required tone of the sentence: ${options.tone || 'neutral'}.
-Only reply with the final translated sentence. Do not include quotes, explanations, or any other wrapper text.
+Only reply with the translated phrase. No quotes, no explanations, no AI-speak. Just the words.
 
 Signs: ${signsList}`;
 
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "meta-llama/llama-3.1-8b-instruct:free",
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
+    // fallback models in case openrouter is busy
+    const models = [
+      "google/gemma-4-31b-it:free",
+      "meta-llama/llama-3.2-3b-instruct:free",
+      "google/gemma-4-26b-a4b-it:free",
+      "deepseek/deepseek-chat:free",
+      "openrouter/auto"
+    ];
 
-      const data = await res.json();
+    for (const model of models) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://127.0.0.1:5500",
+            "X-Title": "ASL Interpreter"
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: prompt }]
+          })
+        });
 
-      if (data?.choices?.[0]?.message) {
-        return { text: data.choices[0].message.content.trim() };
+        const data = await res.json();
+        
+        if (!data.error && data?.choices?.[0]?.message) {
+          return { text: data.choices[0].message.content.trim() };
+        }
+        
+      } catch (err) {
+        // silently fail and try the next model
+        console.warn(`model ${model} failed, trying next...`);
       }
-      throw new Error("bad output");
-
-    } catch (err) {
-      console.error("translation req failed:", err);
-      return { text: "api error, check console" };
     }
+
+    // if all of them fail
+    return { text: "err: all providers are busy or your openrouter account isn't verified." };
   },
 
   // hit the browser's built-in text to speech API
