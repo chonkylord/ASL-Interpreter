@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<!-- these blobs are just here to make the page feel less empty -->
+<!-- Decorative background blobs. -->
 <div class="blobs" aria-hidden="true">
   <div class="blob b1"></div>
   <div class="blob b2"></div>
@@ -19,7 +19,7 @@
   <div class="blob b4"></div>
 </div>
 
-<!-- top bar thing -->
+<!-- Top bar -->
 <header class="topbar">
   <a class="brand" href="#">
     <span class="brand-mark" aria-hidden="true">
@@ -27,12 +27,12 @@
     </span>
     <span class="brand-word">asl translator</span>
   </a>
-  <span class="topbar-tag">voice-ready frontend</span>
+  <span class="topbar-tag">live · mediapipe · gpt voice</span>
 </header>
 
-<!-- main page wrapper -->
+<!-- Main page -->
 <main class="page">
-  <!-- intro section because first impressions matter -->
+  <!-- Intro -->
   <section class="intro">
     <span class="eyebrow">
       <span class="eyebrow-dot"></span>
@@ -44,9 +44,9 @@
     <p class="lede">Record yourself signing, let the backend translate, and hear it spoken out loud.</p>
   </section>
 
-  <!-- the main app card -->
+  <!-- Main app card -->
   <section class="studio" data-screen-label="Studio">
-    <!-- step rail that shows the fake progress -->
+    <!-- Pipeline step rail -->
     <ol class="steprail" aria-label="Pipeline status">
       <li class="step" data-step="record" data-state="idle">
         <span class="step-num">1</span>
@@ -69,11 +69,11 @@
       </li>
     </ol>
 
-    <!-- camera / preview stage -->
+    <!-- Camera preview -->
     <div class="stage">
       <video id="camera" playsinline muted autoplay></video>
 
-      <!-- placeholder when camera is not ready -->
+      <!-- Placeholder shown before the camera is ready. -->
       <div class="placeholder" id="placeholder">
         <div class="ph-icon" aria-hidden="true">
           <svg viewBox="0 0 64 64" width="56" height="56">
@@ -85,26 +85,26 @@
         <p class="ph-sub">Press <em>Start recording</em> or upload a video below.</p>
       </div>
 
-      <!-- corner marks because that looks fancy -->
+      <!-- Corner marks -->
       <span class="corner tl"></span><span class="corner tr"></span>
       <span class="corner bl"></span><span class="corner br"></span>
 
-      <!-- recording pill -->
+      <!-- Recording indicator -->
       <div class="recpill" id="recPill" hidden>
         <span class="rdot"></span><span id="recTime">0:00</span>
       </div>
 
-      <!-- scanning overlay for the backend wait moment -->
+      <!-- Scanning overlay -->
       <div class="scanning" id="scanning" hidden>
         <div class="scan-line"></div>
-        <div class="scan-label">waiting for backend analysis…</div>
+        <div class="scan-label">reading hand signs…</div>
         <div class="floating-hands">
           <span>✋</span><span>🤚</span><span>👋</span><span>🤟</span><span>👌</span>
         </div>
       </div>
     </div>
 
-    <!-- buttons area -->
+    <!-- Controls -->
     <div class="controls">
       <button class="btn-primary" id="recordBtn">
         <span class="btn-dot"></span>

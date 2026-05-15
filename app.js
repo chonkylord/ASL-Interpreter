@@ -1,6 +1,6 @@
-// this file is the page brain and it does a lot of little jobs
+// Main UI controller for the page.
 (function () {
-  // tiny helpers because repeating code is annoying
+  // Small utilities shared across the UI.
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -17,7 +17,7 @@
       "'": "&#39;",
     }[char]));
 
-  // all the page memory lives here
+  // Central UI state.
   const state = {
     cameraStream: null,
     recording: false,
@@ -31,9 +31,11 @@
     lastText: null,
     lastDuration: 0,
     playTimer: null,
+    audioElement: null,  // real Audio element from OpenAI TTS
+    liveSymbols: [],     // symbols accumulated during live recording
   };
 
-  // saved dom bits so the rest of the code can poke them
+  // Cached DOM references.
   const els = {
     camera: $("#camera"),
     placeholder: $("#placeholder"),
@@ -62,7 +64,7 @@
     voiceDur: $("#voiceDur"),
   };
 
-  // make the waveform bars once at startup
+  // Build the waveform once at startup.
   const WAVE_BARS = 36;
   for (let i = 0; i < WAVE_BARS; i++) {
     const bar = document.createElement("span");
@@ -70,17 +72,16 @@
     els.waveform.appendChild(bar);
   }
 
-  // update one step on the little progress rail
+  // Update a single step in the progress rail.
   function setStep(name, mode) {
     const el = els.steps[name];
     if (!el) return;
     el.dataset.state = mode;
-    // yep this swaps the number for a check when done
     const num = el.querySelector(".step-num");
     num.textContent = mode === "done" ? "✓" : ({ record: "1", detect: "2", translate: "3", speak: "4" })[name];
   }
 
-  // back to the basic idle state
+  // Reset the step rail to idle.
   function resetSteps() {
     setStep("record", "idle");
     setStep("detect", "idle");
@@ -88,7 +89,7 @@
     setStep("speak", "idle");
   }
 
-  // show the default empty state text
+  // Restore the default empty state.
   function setEmptyState(message) {
     els.gestures.innerHTML = `<span class="empty">${escapeHtml(message)}</span>`;
     els.confLabel.textContent = "—";
@@ -99,6 +100,29 @@
     els.voiceDur.textContent = "0:00";
     els.playBtn.disabled = true;
     els.waveform.querySelectorAll("span").forEach((bar) => bar.classList.remove("on"));
+  }
+
+  // Normalize symbols before sending them downstream.
+  function normalizeSymbols(symbols) {
+    for (const symbol of Array.isArray(symbols) ? symbols : []) {
+      if (!symbol || !symbol.label) continue;
+      const label = String(symbol.label).trim();
+      if (!label) continue;
+      symbol.label = label;
+    }
+    return Array.isArray(symbols) ? symbols.filter((symbol) => symbol && symbol.label) : [];
+  }
+
+  // Add a detected sign token to the gestures panel.
+  function addLiveSymbol(symbol) {
+    const emptyEl = els.gestures.querySelector(".empty");
+    if (emptyEl) emptyEl.remove();
+    const token = document.createElement("div");
+    token.className = "gesture-token";
+    token.innerHTML = `<span class="emo">${escapeHtml(symbol.emoji || "✋")}</span><span class="lab">${escapeHtml(symbol.label || "SIGN")}</span>`;
+    els.gestures.appendChild(token);
+    state.liveSymbols.push(symbol);
+    els.confLabel.textContent = `${state.liveSymbols.length} sign${state.liveSymbols.length !== 1 ? "s" : ""}`;
   }
 
   // start the whole page in a blank-ish state
@@ -143,21 +167,39 @@
   async function onRecordClick() {
     if (state.busy) return;
     if (!state.recording) {
-      await startCamera();
+      const cameraReady = await startCamera();
+      if (!cameraReady) return;
       state.recording = true;
       state.recStartedAt = Date.now();
+      state.liveSymbols = [];
+      els.gestures.innerHTML = "";
+      els.confLabel.textContent = "—";
       els.recordLabel.textContent = "Stop & translate";
       els.recordBtn.classList.add("is-recording");
       els.recPill.hidden = false;
       setStep("record", "active");
+      setStep("detect", "active");
       state.recTimer = setInterval(() => {
         els.recTime.textContent = fmtTime((Date.now() - state.recStartedAt) / 1000);
       }, 200);
+      // kick off live detection — symbols appear in the UI as you sign
+      if (window.aslBackend?.startLiveDetection) {
+        try {
+          await window.aslBackend.startLiveDetection(addLiveSymbol);
+        } catch (error) {
+          console.warn("Live detection could not start, falling back to upload-style scan.", error);
+        }
+      }
       return;
     }
 
+    // collect whatever was detected, then run the rest of the pipeline
+    let liveSymbols = [];
+    if (window.aslBackend?.stopLiveDetection) {
+      liveSymbols = normalizeSymbols(window.aslBackend.stopLiveDetection());
+    }
     stopRecording();
-    await runPipeline();
+    await runPipeline(liveSymbols);
   }
 
   // stop recording and put the ui back
@@ -172,44 +214,49 @@
   }
 
   // the full detect -> translate -> speak flow
-  async function runPipeline() {
+  // preDetectedSymbols comes from the live recording loop; empty array triggers upload fallback
+  async function runPipeline(preDetectedSymbols) {
     state.busy = true;
     els.recordBtn.disabled = true;
 
     try {
       const backend = await requireBackend();
 
-      // detect signs first
-      setStep("detect", "active");
-      els.scanning.hidden = false;
-      els.gestures.innerHTML = "";
-      await sleep(800);
+      let symbols = normalizeSymbols(preDetectedSymbols);
 
-      const det = await backend.detectGestures();
-      els.scanning.hidden = true;
+      if (symbols.length === 0) {
+        // upload / fallback path: scan the current video frame
+        setStep("detect", "active");
+        els.scanning.hidden = false;
+        els.gestures.innerHTML = "";
+        await sleep(800);
 
-      // confidence gets shown as a percent because that is readable
-      const confidence = Number.isFinite(det?.confidence) ? Math.round(det.confidence * 100) : null;
-      els.confLabel.textContent = confidence == null ? "Unknown confidence" : `${confidence}% confidence`;
+        const det = await backend.detectGestures();
+        els.scanning.hidden = true;
 
-      // make sure we actually got signs back
-      const symbols = Array.isArray(det?.symbols) ? det.symbols : [];
-      if (!symbols.length) {
-        throw new Error("No detected signs were returned.");
+        const confidence = Number.isFinite(det?.confidence) ? Math.round(det.confidence * 100) : null;
+        els.confLabel.textContent = confidence == null ? "Unknown confidence" : `${confidence}% confidence`;
+
+        symbols = normalizeSymbols(det?.symbols);
+
+        for (let i = 0; i < symbols.length; i++) {
+          const symbol = symbols[i];
+          const token = document.createElement("div");
+          token.className = "gesture-token";
+          token.style.animationDelay = `${i * 70}ms`;
+          token.innerHTML = `<span class="emo">${escapeHtml(symbol.emoji || "✋")}</span><span class="lab">${escapeHtml(symbol.label || "SIGN")}</span>`;
+          els.gestures.appendChild(token);
+          await sleep(140);
+        }
       }
-
-      for (let i = 0; i < symbols.length; i++) {
-        const symbol = symbols[i];
-        const token = document.createElement("div");
-        token.className = "gesture-token";
-        token.style.animationDelay = `${i * 70}ms`;
-        token.innerHTML = `<span class="emo">${escapeHtml(symbol.emoji || "✋")}</span><span class="lab">${escapeHtml(symbol.label || "SIGN")}</span>`;
-        els.gestures.appendChild(token);
-        await sleep(140);
-      }
+      // live path: symbols already rendered by addLiveSymbol — just lock in the step
       setStep("detect", "done");
 
-      // translation part
+      if (!symbols.length) {
+        throw new Error("No signs detected — try signing closer to the camera.");
+      }
+
+      // translation
       setStep("translate", "active");
       els.bubble.classList.add("is-active", "is-typing");
       els.sentenceText.classList.remove("bubble-placeholder");
@@ -217,22 +264,37 @@
 
       const ai = await backend.interpret(symbols, { tone: state.tone });
       const target = String(ai?.text || "").trim();
-      if (!target) {
-        throw new Error("Translation came back empty.");
-      }
+      if (!target) throw new Error("Translation came back empty.");
 
       for (let i = 0; i <= target.length; i++) {
         els.sentenceText.textContent = target.slice(0, i);
         await sleep(18);
       }
-
       els.bubble.classList.remove("is-typing");
       state.lastText = target;
       setStep("translate", "done");
 
-      // voice part
+      // voice synthesis
       setStep("speak", "active");
       const tts = await backend.synthesize(target, { voice: state.voice });
+
+      // wire up real audio element if OpenAI TTS returned a blob URL
+      if (tts?.audioUrl) {
+        if (state.audioElement) {
+          state.audioElement.pause();
+          URL.revokeObjectURL(state.audioElement.src);
+        }
+        state.audioElement = new Audio(tts.audioUrl);
+        state.audioElement.addEventListener("ended", stopPlaying);
+        state.audioElement.addEventListener("timeupdate", () => {
+          if (state.audioElement) {
+            els.voiceCur.textContent = fmtTime(state.audioElement.currentTime);
+          }
+        });
+      } else {
+        state.audioElement = null;
+      }
+
       state.lastDuration = Number(tts?.duration) || 0;
       els.voiceDur.textContent = fmtTime(state.lastDuration);
       lightWaveform(state.lastDuration);
@@ -241,7 +303,6 @@
 
       startPlaying();
     } catch (error) {
-      // if something breaks, at least show a message instead of silence
       els.scanning.hidden = true;
       setEmptyState(error instanceof Error ? error.message : "Something went wrong.");
       resetSteps();
@@ -262,7 +323,7 @@
     });
   }
 
-  // fake playback timer because the audio hookup might come later
+  // start playback from the beginning (called automatically after synthesis)
   function startPlaying() {
     stopPlaying();
     if (!state.lastDuration) return;
@@ -272,48 +333,77 @@
     els.playBtn.dataset.state = "playing";
     els.voiceCard.dataset.playing = "true";
 
-    const tickMs = 100;
-    state.playTimer = setInterval(() => {
-      state.playCursor += tickMs / 1000;
-      if (state.playCursor >= state.lastDuration) {
-        state.playCursor = state.lastDuration;
+    if (state.audioElement) {
+      // real OpenAI audio
+      state.audioElement.currentTime = 0;
+      state.audioElement.play().catch(console.error);
+    } else {
+      // browser speech fallback — use a progress timer since there is no audio element
+      const tickMs = 100;
+      state.playTimer = setInterval(() => {
+        state.playCursor += tickMs / 1000;
+        if (state.playCursor >= state.lastDuration) {
+          state.playCursor = state.lastDuration;
+          els.voiceCur.textContent = fmtTime(state.playCursor);
+          stopPlaying();
+          return;
+        }
         els.voiceCur.textContent = fmtTime(state.playCursor);
-        stopPlaying();
-        return;
-      }
-      els.voiceCur.textContent = fmtTime(state.playCursor);
-    }, tickMs);
+      }, tickMs);
+    }
   }
 
-  // stop the playback timer and flip the button back
+  // stop / pause playback and reset button state
   function stopPlaying() {
     state.playing = false;
+    if (state.audioElement && !state.audioElement.paused) {
+      state.audioElement.pause();
+    }
     clearInterval(state.playTimer);
     state.playTimer = null;
     els.playBtn.dataset.state = "paused";
     els.voiceCard.dataset.playing = "false";
   }
 
-  // basic play / pause toggle
+  // play / pause toggle wired to the button
   function togglePlay() {
     if (!state.lastText) return;
-    if (state.playing) stopPlaying();
-    else startPlaying();
+    if (state.playing) {
+      stopPlaying();
+    } else {
+      state.playing = true;
+      els.playBtn.dataset.state = "playing";
+      els.voiceCard.dataset.playing = "true";
+      if (state.audioElement) {
+        state.audioElement.play().catch(console.error);
+      } else {
+        startPlaying(); // restarts the progress timer for browser speech
+      }
+    }
   }
 
   // reset everything back to the beginning
   function fullReset() {
-    if (state.recording) stopRecording();
+    if (state.recording) {
+      if (window.aslBackend?.stopLiveDetection) window.aslBackend.stopLiveDetection();
+      stopRecording();
+    }
+    if (state.audioElement) {
+      state.audioElement.pause();
+      if (state.audioElement.src.startsWith("blob:")) URL.revokeObjectURL(state.audioElement.src);
+      state.audioElement = null;
+    }
     state.lastText = null;
     state.lastDuration = 0;
     state.playCursor = 0;
+    state.liveSymbols = [];
     stopPlaying();
     resetSteps();
     setEmptyState("No signs yet — record something to begin.");
     els.scanning.hidden = true;
   }
 
-  // upload flow just swaps in the file and reuses the same pipeline
+  // upload flow just swaps in the file and reuses the same pipeline (no live symbols)
   async function onUpload(file) {
     if (!file) return;
     const url = URL.createObjectURL(file);
@@ -324,7 +414,7 @@
     els.camera.play().catch(() => {});
     els.placeholder.style.display = "none";
     setStep("record", "done");
-    await runPipeline();
+    await runPipeline([]); // empty array triggers the single-frame fallback
   }
 
   // wiring time
@@ -332,8 +422,38 @@
   els.resetBtn.addEventListener("click", fullReset);
   els.playBtn.addEventListener("click", togglePlay);
   els.uploadInput.addEventListener("change", (event) => onUpload(event.target.files?.[0]));
-  els.voiceSel.addEventListener("change", (event) => {
+  els.voiceSel.addEventListener("change", async (event) => {
     state.voice = event.target.value;
+    if (!state.lastText || state.busy) return;
+
+    // re-synthesize the existing translation with the newly selected voice
+    els.playBtn.disabled = true;
+    stopPlaying();
+    const backend = window.aslBackend;
+    if (!backend) return;
+    try {
+      const tts = await backend.synthesize(state.lastText, { voice: state.voice });
+      if (tts?.audioUrl) {
+        if (state.audioElement) {
+          state.audioElement.pause();
+          URL.revokeObjectURL(state.audioElement.src);
+        }
+        state.audioElement = new Audio(tts.audioUrl);
+        state.audioElement.addEventListener("ended", stopPlaying);
+        state.audioElement.addEventListener("timeupdate", () => {
+          if (state.audioElement) els.voiceCur.textContent = fmtTime(state.audioElement.currentTime);
+        });
+      } else {
+        state.audioElement = null;
+      }
+      state.lastDuration = Number(tts?.duration) || 0;
+      els.voiceDur.textContent = fmtTime(state.lastDuration);
+      lightWaveform(state.lastDuration);
+      els.playBtn.disabled = false;
+      startPlaying();
+    } catch (_) {
+      els.playBtn.disabled = false;
+    }
   });
 
   // tone buttons only change the vibe

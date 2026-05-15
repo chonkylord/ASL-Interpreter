@@ -1,113 +1,105 @@
 # ASL Interpreter
 
-takes ASL from a webcam or video file, detects the signs, translates them into a sentence, and reads it out loud. the frontend is done. it needs a backend.
+A browser-based ASL demo that records webcam or uploaded video, detects signing, translates the detected gloss sequence into English, and speaks the result.
 
 ---
 
-## pipeline
+## What this repo is for
 
-1. **Record** — webcam or uploaded video
-2. **Detect** — fingerpose reads the hand landmarks and returns signs
-3. **Translate** — openrouter turns the signs into a natural sentence
-4. **Speak** — TTS reads it out
+This repo is set up for a future-proof demo where inference happens on a hosted service, not on the demo PC.
+
+- The browser app handles capture, UI, upload, playback, and TTS orchestration.
+- `backend.js` extracts MediaPipe landmarks, builds hand crops, and calls a hosted model endpoint.
+- `asl_service.py` is a deployable FastAPI inference service you can host on a VM, container platform, or other server.
+- `OpenRouter` is used to turn gloss tokens into a natural English sentence.
+- `OpenAI` TTS is used when configured, with browser speech as fallback.
 
 ---
 
-## project structure
+## Project Structure
 
-```
+```text
 ASL Interpreter/
-├── index.html    ← page layout and all the elements
-├── styles.css    ← styles, dark theme, animated background blobs
-└── app.js        ← handles recording, the pipeline, and all UI state
+|-- index.html       page layout and script loading
+|-- styles.css       visual styling
+|-- app.js           UI state, recording flow, upload flow, playback
+|-- backend.js       MediaPipe tracking, model-service calls, translation, TTS
+|-- asl_service.py   deployable pretrained ASL inference service
+|-- config.example.js
+`-- config.js        local secrets and hosted service URL, gitignored
 ```
-
-**app.js quick notes:**
-- `state` — holds recording status, selected voice, last translated text, etc
-- `els` — cached DOM references
-- `runPipeline()` — the main function, calls detect → translate → speak in order
-- `window.aslBackend` — the object the frontend calls into. you need to provide this
 
 ---
 
-## connecting the backend
+## Runtime Flow
 
-create a `backend.js` file and add it to `index.html` before `app.js`:
+1. The browser captures webcam video or loads an uploaded clip.
+2. MediaPipe tracks hand landmarks in the browser.
+3. The browser crops the hand region and sends it to the hosted ASL inference service.
+4. The service returns a predicted label and confidence.
+5. The browser converts the detected symbols into gloss tokens.
+6. OpenRouter rewrites the gloss tokens into a natural English sentence.
+7. The app speaks the sentence with OpenAI TTS or browser speech fallback.
 
-```html
-<script src="backend.js"></script>
-<script src="app.js"></script>
-```
+---
 
-the file needs to set `window.aslBackend` with these 3 methods:
+## Config
+
+Copy `config.example.js` to `config.js` and fill in your values:
 
 ```js
-window.aslBackend = {
-  detectGestures: async function() {
-    // run fingerpose on the video, return detected signs
-    return {
-      confidence: 0.87,        // 0 to 1
-      symbols: [
-        { label: "HELLO", emoji: "👋" },
-        { label: "WORLD", emoji: "🌍" },
-      ]
-    };
-  },
-
-  interpret: async function(symbols, options) {
-    // symbols = array from detectGestures
-    // options.tone = "warm" | "neutral" | "formal"
-    // call openrouter here
-    return {
-      text: "Hello world."
-    };
-  },
-
-  synthesize: async function(text, options) {
-    // text = translated sentence
-    // options.voice = "nova" | "rio" | "ash" | "june"
-    // do TTS here
-    return {
-      duration: 3.2    // seconds
-    };
-  }
+const CONFIG = {
+  OPENROUTER_API_KEY: "YOUR_OPENROUTER_KEY_HERE",
+  OPENAI_API_KEY: "YOUR_OPENAI_KEY_HERE",
+  MODEL_SERVICE_URL: "https://asl-model.yourdomain.com",
 };
 ```
 
-if any of those 3 methods are missing, the app will show an error and stop.
+`MODEL_SERVICE_URL` should point to the hosted inference service that serves `/health` and `/predict`.
 
 ---
 
-## fingerpose
+## Hosted Inference Service
 
-fingerpose is a js library that matches hand keypoints to gestures. you need mediapipe hands or tensorflow handpose to get the keypoints first, then pass them into fingerpose.
+The repo includes `asl_service.py`, a deployable FastAPI service. It is designed to be hosted remotely so the demo PC does not need to download or run the model locally.
 
-steps:
-1. load mediapipe/tensorflow handpose
-2. grab frames from `document.querySelector("#camera")`
-3. get keypoints → run through fingerpose → map to ASL label + emoji
-4. return from `detectGestures()`
+Recommended deployment shape:
 
----
+- Host `asl_service.py` on a VM, container platform, or GPU-backed server.
+- Make sure the service exposes:
+  - `GET /health`
+  - `POST /predict`
+- Set `MODEL_SERVICE_URL` in `config.js` to that public endpoint.
+- If you want to avoid any on-demand model download in production, mount a directory containing `best_model.pth` and `class_mapping.json`, then set `MODEL_DIR` for the service.
+- If you do allow the service to fetch weights during deploy, keep `ALLOW_HF_DOWNLOAD=1` on the hosted machine, not the demo PC.
 
-## openrouter
-
-openrouter is one API that routes to a bunch of different AI models. use it in `interpret()` to build a sentence from the detected signs.
-
-example prompt:
-```
-You are an ASL interpreter. Convert these signs into a natural english sentence.
-Signs: HELLO, MY, NAME, IS
-Tone: warm
-```
-
-use `options.tone` to adjust the prompt. don't hardcode your API key — put it in a config file that's gitignored.
+For local development only, you can still run the service on your own machine if you want, but the app does not depend on that.
 
 ---
 
-## setup
+## Endpoints
 
-1. clone the repo
-2. open `index.html` with live server
-3. create `backend.js` with the `window.aslBackend` object
-4. implement the 3 methods
+### `detectGestures()`
+
+Returns a detected symbol sequence from the current webcam frame or uploaded video.
+
+### `interpret(symbols, options)`
+
+Uses OpenRouter to convert the detected gloss sequence into one English sentence.
+
+### `synthesize(text, options)`
+
+Uses OpenAI TTS when configured, otherwise falls back to browser speech.
+
+### `startLiveDetection()` / `stopLiveDetection()`
+
+Optional live detection hooks used by the recording UI.
+
+---
+
+## Notes
+
+- This is a no-training pipeline.
+- The recognizer is strongest when backed by a real pretrained inference service.
+- The browser-side MediaPipe tracking is only used to extract useful hand crops and timing context.
+- Keep `config.js` out of version control.
