@@ -73,6 +73,9 @@ Recommended deployment shape:
 - If you want to avoid any on-demand model download in production, mount a directory containing `best_model.pth` and `class_mapping.json`, then set `MODEL_DIR` for the service.
 - If you do allow the service to fetch weights during deploy, keep `ALLOW_HF_DOWNLOAD=1` on the hosted machine, not the demo PC.
 
+TODO:
+- Replace the pretrained checkpoint with a custom ASL model once we have time and data for it.
+
 For local development only, you can still run the service on your own machine if you want, but the app does not depend on that.
 
 ---
