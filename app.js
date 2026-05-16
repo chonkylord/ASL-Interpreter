@@ -25,7 +25,7 @@
     recTimer: null,
     busy: false,
     tone: "warm",
-    voice: "nova",
+    voice: "alice",
     playing: false,
     playCursor: 0,
     lastText: null,
@@ -132,8 +132,8 @@
       throw new Error("Backend not connected yet.");
     }
     if (typeof backend.detectGestures !== "function" ||
-        typeof backend.interpret !== "function" ||
-        typeof backend.synthesize !== "function") {
+      typeof backend.interpret !== "function" ||
+      typeof backend.synthesize !== "function") {
       throw new Error("Backend is missing one or more required methods.");
     }
     return backend;
@@ -267,6 +267,12 @@
     stopPlaying();
     if (!state.lastDuration) return;
 
+    // actually replay the voice if they multi-pressed the play button
+    if (window.lastAudio) {
+      window.lastAudio.currentTime = 0;
+      window.lastAudio.play();
+    }
+
     state.playing = true;
     state.playCursor = 0;
     els.playBtn.dataset.state = "playing";
@@ -321,7 +327,7 @@
     els.camera.src = url;
     els.camera.loop = false;
     els.camera.muted = true;
-    els.camera.play().catch(() => {});
+    els.camera.play().catch(() => { });
     els.placeholder.style.display = "none";
     setStep("record", "done");
     await runPipeline();
@@ -332,8 +338,21 @@
   els.resetBtn.addEventListener("click", fullReset);
   els.playBtn.addEventListener("click", togglePlay);
   els.uploadInput.addEventListener("change", (event) => onUpload(event.target.files?.[0]));
-  els.voiceSel.addEventListener("change", (event) => {
+  els.voiceSel.addEventListener("change", async (event) => {
     state.voice = event.target.value;
+    
+    // if we already have a translation, fetch the new voice right now
+    if (state.lastText) {
+      els.playBtn.disabled = true;
+      const tts = await window.aslBackend.synthesize(state.lastText, { voice: state.voice });
+      state.lastDuration = Number(tts?.duration) || 0;
+      els.voiceDur.textContent = fmtTime(state.lastDuration);
+      lightWaveform(state.lastDuration);
+      els.playBtn.disabled = false;
+      
+      // instantly play the new voice
+      startPlaying();
+    }
   });
 
   // tone buttons only change the vibe

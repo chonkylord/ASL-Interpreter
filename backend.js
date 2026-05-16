@@ -18,7 +18,7 @@ window.aslBackend = {
   },
 
   interpret: async function (symbols, options) {
-    if (!CONFIG?.OPENROUTER_API_KEY || CONFIG.OPENROUTER_API_KEY === "YOUR_API_KEY_HERE") {
+    if (!CONFIG?.OPENROUTER_API_KEY || CONFIG.OPENROUTER_API_KEY === "openrouter_key") {
       return { text: "err: missing api key in config.js" };
     }
 
@@ -56,11 +56,11 @@ Signs: ${signsList}`;
         });
 
         const data = await res.json();
-        
+
         if (!data.error && data?.choices?.[0]?.message) {
           return { text: data.choices[0].message.content.trim() };
         }
-        
+
       } catch (err) {
         // silently fail and try the next model
         console.warn(`model ${model} failed, trying next...`);
@@ -71,33 +71,62 @@ Signs: ${signsList}`;
     return { text: "err: all providers are busy or your openrouter account isn't verified." };
   },
 
-  // hit the browser's built-in text to speech API
+  // using elevenlabs api for audio
   synthesize: async function (text, options) {
-    return new Promise((res) => {
-      if (!('speechSynthesis' in window)) {
-        res({ duration: 0 });
-        return;
+    return new Promise(async (res) => {
+      if (!CONFIG?.ELEVENLABS_API_KEY || CONFIG.ELEVENLABS_API_KEY === "elevenlabs_key") {
+        console.warn("missing elevenlabs api key");
+        return res({ duration: 0 });
       }
 
-      window.speechSynthesis.cancel();
-
-      const utter = new SpeechSynthesisUtterance(text);
-
-      // slightly tweak pitch/rate for the different voices
+      // Voice mapping
+      let voiceId = "Xb7hH8MSUJpSbSDYk0k2"; // default to Alice
       switch (options.voice) {
-        case 'nova': utter.pitch = 1.2; utter.rate = 1.0; break;
-        case 'rio': utter.pitch = 0.8; utter.rate = 0.9; break;
-        case 'ash': utter.pitch = 0.9; utter.rate = 0.85; break;
-        case 'june': utter.pitch = 1.6; utter.rate = 1.1; break;
-        default: utter.pitch = 1.0; utter.rate = 1.0;
+        case 'alice': voiceId = "Xb7hH8MSUJpSbSDYk0k2"; break; // Alice
+        case 'adam': voiceId = "pNInz6obpgDQGcFmaJgB"; break; // Adam
+        case 'bill': voiceId = "pqHfZKP75CvOlQylNhV4"; break; // Bill
+        case 'lily': voiceId = "pFZP5JQG7iQjIQuC4Bku"; break; // Lily
       }
 
-      let start = 0;
-      utter.onstart = () => start = Date.now();
-      utter.onend = () => res({ duration: (Date.now() - start) / 1000 });
-      utter.onerror = () => res({ duration: 0 });
+      try {
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: "POST",
+          headers: {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": CONFIG.ELEVENLABS_API_KEY
+          },
+          body: JSON.stringify({
+            text: text,
+            model_id: "eleven_multilingual_v2", // latest standard free tier model
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.75
+            }
+          })
+        });
 
-      window.speechSynthesis.speak(utter);
+        if (!response.ok) {
+          throw new Error("ElevenLabs API failed. Check API key or quota.");
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+
+        // save globally so app.js play button can hit it again
+        window.lastAudio = audio;
+
+        // wait for the audio to load just enough to get the exact duration
+        audio.addEventListener('loadedmetadata', () => {
+          audio.play(); // blast it out loud
+          res({ duration: audio.duration }); // tell the UI how long it is
+        });
+
+      } catch (err) {
+        console.error("tts err:", err);
+        res({ duration: 0 });
+      }
     });
   }
 };
