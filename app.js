@@ -340,8 +340,8 @@
   els.uploadInput.addEventListener("change", (event) => onUpload(event.target.files?.[0]));
   els.voiceSel.addEventListener("change", async (event) => {
     state.voice = event.target.value;
-    
-    // if we already have a translation, fetch the new voice right now
+
+    // if we already have a translation, fetch the new voice now
     if (state.lastText) {
       els.playBtn.disabled = true;
       const tts = await window.aslBackend.synthesize(state.lastText, { voice: state.voice });
@@ -349,7 +349,7 @@
       els.voiceDur.textContent = fmtTime(state.lastDuration);
       lightWaveform(state.lastDuration);
       els.playBtn.disabled = false;
-      
+
       // instantly play the new voice
       startPlaying();
     }
